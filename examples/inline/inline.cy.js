@@ -16,16 +16,27 @@ describe('Tram-Lite Example Components', () => {
 		cy.get('in-counter#red').click(); // clicking a counter should increment
 		cy.get('in-counter#red').contains(/Red: 1/);
 
+		/* validate that broadcasted events work as expected */
+		cy.get('in-counter#default').click();
+		cy.get('in-counter#default').click();
+		cy.get('in-counter#blue').click();
+		cy.get('in-counter-container').contains(/Total: 4/);
+		cy.get('in-counter-container').find('button#reset').click(); // click reset button
+		cy.get('in-counter#default').contains(/Green: 0/);
+		cy.get('in-counter#red').contains(/Red: 0/);
+		cy.get('in-counter#blue').contains(/Blue: 0/);
+		cy.get('in-counter-container').contains(/Total: 0/);
+
 		/* verify that updating inputs updates attributes as expected (tl-controlled) */
-		cy.get('in-mirror').get('input#source').type('Hello, World');
-		cy.get('in-mirror').get('input#reflection').should('have.value', 'Hello, World');
+		cy.get('in-mirror').find('input#source').type('Hello, World');
+		cy.get('in-mirror').find('input#reflection').should('have.value', 'Hello, World');
 		cy.get('in-mirror').should('have.attr', 'value', 'Hello, World');
 		cy.get('in-mirror').should('have.attr', 'is-mirrored', '');
 
 		/* verify that updating an attribute copies to multiple elements and attributes */
 		cy.get('in-colorpicker').invoke('attr', 'hue', '120');
-		cy.get('in-colorpicker').get('input#hue-range-input').should('have.value', '120');
-		cy.get('in-colorpicker').get('input#hue-text-input').should('have.value', '120');
+		cy.get('in-colorpicker').find('input#hue-range-input').should('have.value', '120');
+		cy.get('in-colorpicker').find('input#hue-text-input').should('have.value', '120');
 		cy.get('in-colorpicker')
 			.get('rect')
 			.then(($element) => {
@@ -38,28 +49,71 @@ describe('Tram-Lite Example Components', () => {
 		cy.get('in-todoitem').contains('Learning Tram-Lite');
 
 		/* verify that creating elements works as expected */
-		cy.get('in-todolist').get('form input').type('Cypress Test'); // create new todo item
-		cy.get('in-todolist').get('form').submit();
+		cy.get('in-todolist').find('form input').type('Cypress Test'); // create new todo item
+		cy.get('in-todolist').find('form').submit();
 
 		cy.get('in-todoitem').contains('Cypress Test'); // verify it exists
 
 		cy.get('in-todoitem').contains('Cypress Test').click(); // click it, and verify that the top label updates
-		cy.get('in-todolist').get('span').contains('(1/3)');
+		cy.get('in-todolist').find('span').contains('(1/3)');
 
 		/* verify that updating an input with a false value unsets the attribute value */
 		cy.get('in-todoitem').contains('Cypress Test').click();
-		cy.get('in-todolist').get('span').contains('(0/3)');
+		cy.get('in-todolist').find('span').contains('(0/3)');
+
+		/* verify that boolean attributes on controlled elements update when host attributes update */
+		cy.get('in-todolist').find('input#select-all').click();
+		cy.get('in-todolist').find('span').contains('(3/3)');
+		cy.get('in-todoitem').find('input').should('be.checked');
+
+		/* verify that attribute removal also emits events */
+		cy.get('in-todolist').find('input#select-all').click(); // deselect all elements
+		cy.get('in-todolist').find('span').contains('(0/3)');
+		cy.get('in-todoitem').click({ multiple: true }); // manually select all elements
+		cy.get('in-todolist').find('span').contains('(3/3)');
+		cy.get('in-todolist').find('input#select-all').should('be.checked'); // it should be checked (since all items are selected)
+		cy.get('in-todolist').find('input#select-all').click(); // should deselect all elements
+		cy.get('in-todolist').find('span').contains('(0/3)');
 
 		/* verify that component effects trigger on dependency updates */
-		cy.get('in-temperature').get('input#f').type('19');
-		cy.get('in-temperature').get('input#c').should('have.value', '-7');
-		cy.get('in-temperature').get('input#f').should('have.value', '19');
+		cy.get('in-temperature').find('input#f').type('19');
+		cy.get('in-temperature').find('input#c').should('have.value', '-7');
+		cy.get('in-temperature').find('input#f').should('have.value', '19');
 
 		/* verify that an element with multiple dependencies triggers on either dependency */
 		cy.get('in-progressbar').should('not.have.attr', 'warning');
-		cy.get('in-progressbar').get('input#value').clear().type('12');
+		cy.get('in-progressbar').find('input#value').clear().type('12');
 		cy.get('in-progressbar').should('have.attr', 'warning');
-		cy.get('in-progressbar').get('input#max').clear().type('15');
+		cy.get('in-progressbar').find('input#max').clear().type('15');
 		cy.get('in-progressbar').should('not.have.attr', 'warning');
+
+		/* verify that components pull initial state from providers */
+		cy.get('tl-provider[tl-name="color-theme"]').find('in-start-color-setter').should('have.attr', 'color', '#E66465');
+		cy.get('tl-provider[tl-name="color-theme"]').find('in-end-color-setter').should('have.attr', 'color', '#9198E5');
+		cy.get('tl-provider[tl-name="color-theme"]').find('in-direction-setter').should('have.attr', 'degrees', '0');
+		cy.get('tl-provider[tl-name="color-theme"]')
+			.find('in-color-preview')
+			.should('have.attr', 'start-color', '#E66465')
+			.should('have.attr', 'end-color', '#9198E5')
+			.should('have.attr', 'degrees', '0');
+
+		/* verify that components update when provider state updates */
+		cy.get('tl-provider[tl-name="color-theme"]').invoke('attr', 'degrees', '45');
+		cy.get('tl-provider[tl-name="color-theme"]').find('in-direction-setter').should('have.attr', 'degrees', '45');
+		cy.get('tl-provider[tl-name="color-theme"]').find('in-color-preview').should('have.attr', 'degrees', '45');
+
+		/* verify that provider updates when component (with context) updates */
+		cy.get('tl-provider[tl-name="color-theme"]').find('in-direction-setter').invoke('attr', 'degrees', '90');
+		cy.get('tl-provider[tl-name="color-theme"]').should('have.attr', 'degrees', '90');
+		cy.get('tl-provider[tl-name="color-theme"]').find('in-color-preview').should('have.attr', 'degrees', '90');
+
+		/* verify that external scripts load and are available in tl-effects */
+		cy.get('in-password-generator')
+			.should('have.attr', 'value')
+			.and('match', /^[\w\d]{10}$/);
+		cy.get('in-password-generator').invoke('attr', 'length', '20');
+		cy.get('in-password-generator')
+			.should('have.attr', 'value')
+			.and('match', /^[\w\d]{20}$/);
 	});
 });

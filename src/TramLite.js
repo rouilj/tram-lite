@@ -1,6 +1,11 @@
 class TramLite {
 	static version = APP_VERSION;
-	static installed = false;
+	static installed = INSTALL;
+
+	// extending HTMLElement so that we can attach shadow root processors
+	//   without interfering with the global HTMLElement prototype
+	//   (this is most important in the import/export case)
+	static ComponentInterface = class extends HTMLElement {};
 
 	/**
 	 * utility function to build the component class from the template string
@@ -21,16 +26,19 @@ class TramLite {
 			defaultAttributeValues[attrNode.name] = attrNode.value;
 		});
 
-		// if there are any component-effects that aren't already on hold, hold them now
-		//   (we don't want them triggering before the component has been completely defined)
+		// if there are any component-effects that aren't already on hold, hold them now.
+		//   we will either hold them until the component has been defined, or if there are
+		//   external scripts, we will hold them until all scripts have loaded
 		// if there is already a hold, we won't touch these elements
 		//   (the developer may want to defer processing until later)
+		const hasExternalScripts = rootElement.querySelector('script[src]') !== null;
+
 		rootElement.querySelectorAll('script[tl-effect]:not([tl-hold])').forEach((componentEffect) => {
-			componentEffect.setAttribute('tl-hold', 'component-mount');
+			componentEffect.setAttribute('tl-hold', hasExternalScripts ? 'external-script' : 'component-mount');
 		});
 
 		// Custom element class with tram-lite template support.
-		class CustomTramLiteElement extends HTMLElement {
+		class CustomTramLiteElement extends TramLite.ComponentInterface {
 			static tramLiteVersion = APP_VERSION;
 			static tagName = rootElement.tagName.toLowerCase();
 
@@ -49,7 +57,7 @@ class TramLite {
 
 				// Create a shadow root
 				// and append our HTML to it
-				const shadow = this.attachShadow({ mode: 'open' });
+				const shadow = this.attachShadow({ mode: 'open', delegatesFocus: true });
 				shadow.append(...rootElement.cloneNode(true).childNodes);
 
 				// scan for any text nodes that have tram-lite wrapped variables (e.g. "tl:label:"),
@@ -152,24 +160,7 @@ class TramLite {
 	}
 
 	/**
-	 * a helper function to update the root web-component when an input updates
-	 * {@link https://tram-one.io/tram-lite/#updateRootAttr Read the full docs here.}
-	 * @param {string} attributeName
-	 * @param {Event} event
-	 * @param {string} [targetAttribute="value"]
-	 */
-	static updateRootAttr(attributeName, event, targetAttribute = 'value') {
-		const rootNodeHost = event.target.getRootNode().host;
-		const targetValue = event.target[targetAttribute];
-		if (targetValue) {
-			rootNodeHost.setAttribute(attributeName, event.target[targetAttribute]);
-		} else {
-			rootNodeHost.removeAttribute(attributeName);
-		}
-	}
-
-	/**
-	 * helper function to set up a callback for when an element's attribute changes
+	 * function to set up a callback for when an element's attribute changes
 	 * {@link https://tram-one.io/tram-lite/#addAttributeListener Read the full docs here.}
 	 * @param {Element} targetElement - The DOM element to observe.
 	 * @param {string[]} attributeNames - The name of the attribute (or list of attributes) to observe for changes.
@@ -190,36 +181,65 @@ class TramLite {
 	}
 
 	/**
-	 * function to append new behaviors to elements that are attached to the shadowDOM.
-	 * {@link https://tram-one.io/tram-lite/#appendShadowRootProcessor Read the full docs here.}
-	 * @param {string} matcher
-	 * @param {{ connect: function }} componentClass
-	 * @param {ShadowRoot} [shadowRoot=ShadowRoot.prototype]
+	 * function to dispatch events up or down from a host component.
+	 * {@link https://tram-one.io/tram-lite/#broadcastEvent Read the full docs here.}
+	 * @param {HTMLElement} element - element to associate with the event, and to dispatch from
+	 * @param {string} eventName - event name, can be listened for from other elements
+	 * @param {'up' | 'down'} eventDirection - dictates which elements should receive the event, parents ('up') or children ('down')
 	 */
-	static appendShadowRootProcessor(matcher, componentClass, shadowRoot = ShadowRoot.prototype) {
-		// save the original version of shadowRoot.append
-		const shAppend = shadowRoot.append;
-
-		shadowRoot.append = function (...nodes) {
-			shAppend.call(this, ...nodes);
-			// if any element in this shadowRoot matches our matcher,
-			//   run the `connect` function from this class
-			this.querySelectorAll(matcher).forEach((matchingElement) => {
-				if (matchingElement.getRootNode().host) {
-					componentClass.connect(matchingElement);
-				}
+	static broadcastEvent(element, eventName, eventDirection) {
+		const eventDetails = { originalElement: element };
+		if (eventDirection === 'up') {
+			const customEvent = new CustomEvent(eventName, {
+				bubbles: true,
+				composed: true,
+				detail: eventDetails,
 			});
+			element.dispatchEvent(customEvent);
+		}
+		if (eventDirection === 'down') {
+			// if we are dispatching an event to child elements, query all child elements,
+			//   and dispatch on each one individually
+			const customEvent = new CustomEvent(eventName, {
+				bubbles: false,
+				composed: false,
+				detail: eventDetails,
+			});
+			const allChildElements = [...element.shadowRoot.querySelectorAll('*'), ...element.querySelectorAll('*')];
+			allChildElements.forEach((child) => child.dispatchEvent(customEvent));
+		}
+	}
+
+	/**
+	 * function to append new behaviors to elements that are attached to the shadowDOM.
+	 * Can be used for Tram-Lite component definitions, and generic Web-Component classes.
+	 * {@link https://tram-one.io/tram-lite/#appendShadowRootProcessor Read the full docs here.}
+	 * @param {string} matcher - css selectors to match on new elements that are appended to shadowDOM.
+	 * @param {{ connect: function }} processorClass - class with a static connect function, which are associated with newly attached nodes.
+	 * @param {typeof HTMLElement} [componentInterface=TramLite.ComponentInterface] - Web Component class that we should add this shadowRootProcessor on
+	 */
+	static appendShadowRootProcessor(matcher, processorClass, componentInterface = TramLite.ComponentInterface) {
+		// override attachShadow so that we can add shadowRootProcessors
+		const attachShadow = componentInterface.prototype.attachShadow;
+
+		componentInterface.prototype.attachShadow = function (...options) {
+			const shadowRoot = attachShadow.call(this, ...options);
+
+			// save the original version of shadowRoot.append
+			const shAppend = shadowRoot.append;
+
+			shadowRoot.append = function (...nodes) {
+				shAppend.call(this, ...nodes);
+				// if any element in this shadowRoot matches our matcher,
+				//   run the `connect` function from this class
+				this.querySelectorAll(matcher).forEach((matchingElement) => {
+					if (matchingElement.getRootNode().host) {
+						processorClass.connect(matchingElement);
+					}
+				});
+			};
+
+			return shadowRoot;
 		};
 	}
-}
-
-if (MODULE === true) {
-	// if module is available, export this class
-	if (typeof module !== 'undefined') {
-		module.exports = TramLite;
-	}
-}
-if (INSTALL === true) {
-	// if this is a script tag, note that we've installed Tram-Lite listeners
-	TramLite.installed = true;
 }

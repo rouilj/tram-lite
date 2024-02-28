@@ -21,7 +21,11 @@ class ComponentEffect {
 
 		// provide a scoped evaluation of the script tags in this element
 		const scopedEval = (script) => {
-			return Function('document', 'window', script).bind(hostElement)(hostElement.shadowRoot, window);
+			return Function('document', 'window', 'TramLite', script).bind(hostElement)(
+				hostElement.shadowRoot,
+				window,
+				TramLite,
+			);
 		};
 
 		scopedEval(scriptTag.innerHTML);
@@ -60,13 +64,5 @@ class ComponentEffect {
 	}
 }
 
-if (MODULE === true) {
-	// if module is available, export this class
-	if (typeof module !== 'undefined') {
-		module.exports.ComponentEffect = ComponentEffect;
-	}
-}
-if (INSTALL === true) {
-	// setup shadow root processor so that tl-effects that are added are processed correctly
-	TramLite.appendShadowRootProcessor('[tl-effect]', ComponentEffect);
-}
+// setup shadow root processor so that tl-effects that are added are processed correctly
+TramLite.appendShadowRootProcessor('[tl-effect]', ComponentEffect);

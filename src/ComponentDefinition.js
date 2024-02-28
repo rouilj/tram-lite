@@ -10,7 +10,7 @@ class ComponentDefinition {
 
 	/**
 	 * function to test if node has an attribute value with a template variable
-	 * e.g. <custom-element style="color: ${'color'}">
+	 * e.g. \<custom-element style="color: ${'color'}"\>
 	 */
 	static nodeHasTramLiteAttr = (node) =>
 		[...node.attributes].some((attr) => attr.value.match(ComponentDefinition.templateVariableRegex))
@@ -19,7 +19,7 @@ class ComponentDefinition {
 
 	/**
 	 * function to test if node has an TEXT node with a template variable
-	 * e.g. <custom-element>Hello ${'name'}</custom-element>
+	 * e.g. \<custom-element\>Hello ${'name'}\</custom-element\>
 	 */
 	static nodeHasTextElementWithTramLiteAttr = (node) =>
 		node.textContent.match(ComponentDefinition.templateVariableRegex)
@@ -96,11 +96,19 @@ class ComponentDefinition {
 	}
 
 	/**
+	 * function to query and process any templates that already exist in the root document
+	 */
+	static processExistingTemplates() {
+		[...document.querySelectorAll('template[tl-definition]')].forEach((template) => {
+			ComponentDefinition.processTemplateDefinition(template);
+		});
+	}
+
+	/**
 	 * function to set up an observer to watch for when new templates are added,
 	 *   and process all the definitions in them
-	 * @param {Document} [targetRoot=document]
 	 */
-	static setupMutationObserverForTemplates(targetRoot = document) {
+	static setupMutationObserverForTemplates() {
 		/**
 		 * @param {MutationRecord[]} mutationRecords
 		 */
@@ -122,13 +130,9 @@ class ComponentDefinition {
 	}
 }
 
-if (MODULE === true) {
-	// if module is available, export this class
-	if (typeof module !== 'undefined') {
-		module.exports.ComponentDefinition = ComponentDefinition;
-	}
-}
 if (INSTALL === true) {
+	// process any existing template definitions (if this was added after-the-fact)
+	ComponentDefinition.processExistingTemplates();
 	// setup mutation observer so that template elements created will automatically be defined
 	ComponentDefinition.setupMutationObserverForTemplates();
 }
